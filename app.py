@@ -105,9 +105,11 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
         m.location = [center["lat"], center["lng"]]
         m.zoom_start = zoom
         st.session_state._build_used = f"center={center}, zoom={zoom}"
+        st.session_state._last_rendered_view = {"center": center, "zoom": zoom}
     else:
         m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
         st.session_state._build_used = "fit_bounds"
+        st.session_state._last_rendered_view = {"fit_bounds": True}
 
     folium.TileLayer(
         tiles="OpenStreetMap",
@@ -311,10 +313,20 @@ with col_map:
     # Use saved view if valid (not the bogus {lat:0,lng:0} from initial load)
     saved_center = st.session_state.get("_map_center")
     saved_zoom = st.session_state.get("_map_zoom")
-    # Validate: center must be away from 0,0 to be usable
     if saved_center and saved_zoom:
         clat, clng = saved_center.get("lat", 0), saved_center.get("lng", 0)
         if abs(clat) < 1 and abs(clng) < 1:
+            saved_center = None
+            saved_zoom = None
+
+    # If dialog is open, preserve the exact view from the last render
+    # so the map doesn't jump when the dialog triggers a rerun
+    if st.session_state.get("_dialog_open"):
+        lv = st.session_state.get("_last_rendered_view", {})
+        if not lv.get("fit_bounds"):
+            saved_center = lv.get("center")
+            saved_zoom = lv.get("zoom")
+        else:
             saved_center = None
             saved_zoom = None
 
@@ -326,12 +338,14 @@ with col_map:
 
     # Only save view from pan/zoom events — NOT from clicks (which may
     # carry bogus center data from st_folium)
+    # Also ignore zoom <= 2: st_folium reports zoom=1 even after fit_bounds
     if not map_data.get("last_object_clicked"):
         if map_data.get("center") and map_data.get("zoom"):
             c = map_data["center"]
-            if abs(c.get("lat", 0)) > 1 or abs(c.get("lng", 0)) > 1:
+            z = map_data["zoom"]
+            if (abs(c.get("lat", 0)) > 1 or abs(c.get("lng", 0)) > 1) and z > 2:
                 st.session_state._map_center = c
-                st.session_state._map_zoom = map_data["zoom"]
+                st.session_state._map_zoom = z
 
 # ── DEBUG: show raw map_data ─────────────────────────────
 with st.expander("🔧 Debug", expanded=False):
