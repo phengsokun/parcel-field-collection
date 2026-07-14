@@ -58,6 +58,8 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+from shapely.geometry import Point, shape
+
 # ── Helpers ──────────────────────────────────────────────────
 def polygon_centroid(feat):
     """Approximate centroid from exterior ring — good enough for labelling."""
@@ -73,16 +75,14 @@ def polygon_centroid(feat):
     return sum(xs) / len(xs), sum(ys) / len(ys)
 
 
-def build_index(parcels):
-    """Build a lookup {display_name_lower: feature} and {uprn: feature}."""
-    by_name = {}
-    by_uprn = {}
-    for f in parcels["features"]:
-        uprn = f["properties"]["uprn"]
-        name = f["properties"]["display_name"]
-        by_uprn[uprn] = f
-        by_name.setdefault(name.lower(), []).append(f)
-    return by_name, by_uprn
+def find_parcel_at_point(lat, lng, parcels):
+    """Return the GeoJSON feature whose polygon contains (lat, lng)."""
+    pt = Point(lng, lat)
+    for feat in parcels["features"]:
+        geom = shape(feat["geometry"])
+        if geom.contains(pt) or geom.touches(pt) or geom.distance(pt) < 1e-8:
+            return feat
+    return None
 
 
 # ── Map builder ──────────────────────────────────────────────
@@ -342,13 +342,14 @@ def owner_dialog(uprn, display_name):
 
 if map_data.get("last_object_clicked"):
     clicked = map_data["last_object_clicked"]
-    if isinstance(clicked, dict):
-        props = clicked.get("properties", clicked)
-        if props and "uprn" in props:
-            new_uprn = props["uprn"]
+    if isinstance(clicked, dict) and "lat" in clicked and "lng" in clicked:
+        lat, lng = clicked["lat"], clicked["lng"]
+        feat = find_parcel_at_point(lat, lng, parcels)
+        if feat:
+            new_uprn = feat["properties"]["uprn"]
             if new_uprn != st.session_state.get("_last_click_uprn"):
                 st.session_state.selected_uprn = new_uprn
-                st.session_state.selected_display_name = props.get(
+                st.session_state.selected_display_name = feat["properties"].get(
                     "display_name", f"Parcel {new_uprn}"
                 )
                 st.session_state._last_click_uprn = new_uprn
