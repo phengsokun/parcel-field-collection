@@ -86,7 +86,8 @@ def find_parcel_at_point(lat, lng, parcels):
 
 
 # ── Map builder ──────────────────────────────────────────────
-def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
+def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
+              center=None, zoom=None):
     # Compute bounds from all parcel coordinates
     all_coords = []
     for feat in parcels["features"]:
@@ -100,7 +101,12 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
     lons = [c[0] for c in all_coords]
 
     m = folium.Map(tiles=None)
-    m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
+    
+    if center and zoom:
+        m.location = [center["lat"], center["lng"]]
+        m.zoom_start = zoom
+    else:
+        m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
 
     folium.TileLayer(
         tiles="OpenStreetMap",
@@ -301,9 +307,19 @@ if st.session_state.get("_gps_pending"):
 col_map, col_panel = st.columns([3, 1])
 
 with col_map:
-    m = build_map(parcels, owners, points, st.session_state.selected_uprn, st.session_state.show_labels)
+    # Restore previous view if available so map doesn't jump on rerun
+    view_center = st.session_state.get("_map_center")
+    view_zoom = st.session_state.get("_map_zoom")
+    m = build_map(parcels, owners, points, st.session_state.selected_uprn,
+                  st.session_state.show_labels,
+                  center=view_center, zoom=view_zoom)
     map_data = st_folium(m, width=None, height=620)
     st.session_state._map_data = map_data
+    # Save current view for next render
+    if map_data.get("center"):
+        st.session_state._map_center = map_data["center"]
+    if map_data.get("zoom"):
+        st.session_state._map_zoom = map_data["zoom"]
 
 # ── DEBUG: show raw map_data ─────────────────────────────
 with st.expander("🔧 Debug: st_folium return data", expanded=False):
