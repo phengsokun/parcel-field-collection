@@ -150,14 +150,12 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
     if show_labels:
         for feat in parcels["features"]:
             uprn = feat["properties"]["uprn"]
-            owner = owners.get(uprn, "").strip()
             c = polygon_centroid(feat)
             if c is None:
                 continue
-            bg = "rgba(44,160,44,0.85)" if owner else "rgba(51,136,255,0.85)"
             label_html = (
-                f'<div style="font-size:9px;font-weight:bold;color:#fff;'
-                f'background:{bg};padding:1px 4px;border-radius:3px;'
+                f'<div style="font-size:10px;font-weight:bold;color:#222;'
+                f'text-shadow:0 0 3px #fff,0 0 3px #fff;'
                 f'white-space:nowrap;pointer-events:none;">{uprn}</div>'
             )
             folium.Marker(
