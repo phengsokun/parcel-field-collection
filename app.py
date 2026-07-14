@@ -2,13 +2,17 @@ import streamlit as st
 from streamlit_folium import st_folium
 import folium
 from folium.features import GeoJson, GeoJsonTooltip
+from folium.plugins import LocateControl
 import json
 import os
 from datetime import datetime
 
 # ── Page config ──────────────────────────────────────────────
 st.set_page_config(page_title="Parcel Field Collection", layout="wide")
-st.title("📍 Parcel Field Collection")
+st.markdown(
+    "<h3 style='margin-top:0;padding-top:0'>📍 Parcel Field Collection</h3>",
+    unsafe_allow_html=True,
+)
 
 # ── Constants ────────────────────────────────────────────────
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
@@ -45,9 +49,8 @@ points = load_json(POINTS_FILE, [])
 defaults = {
     "selected_uprn": None,
     "selected_display_name": None,
-    "gps_lat": None,
-    "gps_lon": None,
     "_last_click_uprn": None,
+    "_gps_note": "",
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -84,27 +87,32 @@ def build_map(parcels, owners, points, highlight_uprn=None):
     # Enrich features with owner info for tooltip
     features = []
     for feat in parcels["features"]:
+        uprn = feat["properties"]["uprn"]
+        owner = owners.get(uprn, "no owner set")
         f = {
             "type": "Feature",
             "geometry": feat["geometry"],
-            "properties": dict(feat["properties"]),
+            "properties": {
+                "uprn": uprn,
+                "display_name": feat["properties"]["display_name"],
+                "owner": owner,
+            },
         }
-        uprn = f["properties"]["uprn"]
-        owner = owners.get(uprn, "no owner set")
-        f["properties"]["_tooltip"] = (
-            f"{f['properties']['display_name']}  |  {owner}"
-        )
         features.append(f)
 
     GeoJson(
         {"type": "FeatureCollection", "features": features},
         style_function=style_fn,
-        tooltip=GeoJsonTooltip(fields=["_tooltip"], aliases=[""], sticky=False),
+        tooltip=GeoJsonTooltip(
+            fields=["display_name", "uprn", "owner"],
+            aliases=["Name:", "UPRN:", "Owner:"],
+            sticky=False,
+        ),
         name="parcels",
         highlight_function=lambda x: {"weight": 3, "fillOpacity": 0.45},
     ).add_to(m)
 
-    # Collected GPS points
+    # Collected GPS points as markers
     for pt in points:
         popup_html = (
             f"<b>UPRN:</b> {pt.get('uprn', 'none')}<br>"
@@ -116,6 +124,13 @@ def build_map(parcels, owners, points, highlight_uprn=None):
             popup=folium.Popup(popup_html, max_width=250),
             icon=folium.Icon(color="green", icon="map-marker", prefix="fa"),
         ).add_to(m)
+
+    # Locate button directly on the map
+    LocateControl(
+        auto_start=False,
+        keepCurrentZoomLevel=True,
+        strings={"title": "📍 Use my location", "popup": "You are here"},
+    ).add_to(m)
 
     folium.LayerControl().add_to(m)
     return m
@@ -130,16 +145,19 @@ with col_map:
 with col_panel:
     # ── Handle map click ──
     if map_data and map_data.get("last_object_clicked"):
-        props = map_data["last_object_clicked"]
-        if props and "uprn" in props:
-            new_uprn = props["uprn"]
-            if new_uprn != st.session_state._last_click_uprn:
-                st.session_state.selected_uprn = new_uprn
-                st.session_state.selected_display_name = props.get(
-                    "display_name", f"Parcel {new_uprn}"
-                )
-                st.session_state._last_click_uprn = new_uprn
-                st.rerun()
+        clicked = map_data["last_object_clicked"]
+        # st_folium may return full Feature or raw properties dict
+        if isinstance(clicked, dict):
+            props = clicked.get("properties", clicked)
+            if props and "uprn" in props:
+                new_uprn = props["uprn"]
+                if new_uprn != st.session_state._last_click_uprn:
+                    st.session_state.selected_uprn = new_uprn
+                    st.session_state.selected_display_name = props.get(
+                        "display_name", f"Parcel {new_uprn}"
+                    )
+                    st.session_state._last_click_uprn = new_uprn
+                    st.rerun()
 
     # ── Panel content ──
     st.subheader("📋 Parcel Details")
@@ -186,9 +204,9 @@ with st.sidebar:
     st.header("🔧 Tools")
 
     # ── GPS ──
-    st.subheader("📍 GPS Point Collection")
+    st.subheader("📍 Save Location")
 
-    if st.button("📍 Get Current Location", use_container_width=True):
+    if st.button("📍 Save My Location", use_container_width=True):
         st.session_state._gps_pending = True
         st.rerun()
 
@@ -215,39 +233,27 @@ with st.sidebar:
                 if "error" in result:
                     st.error(f"GPS Error: {result['error']}")
                 elif "lat" in result:
-                    st.session_state.gps_lat = result["lat"]
-                    st.session_state.gps_lon = result["lon"]
+                    new_point = {
+                        "uprn": st.session_state.selected_uprn,
+                        "lat": result["lat"],
+                        "lon": result["lon"],
+                        "note": st.session_state.get("_gps_note", ""),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    points.append(new_point)
+                    save_json(POINTS_FILE, points)
+                    st.success(
+                        f"✅ Saved at {result['lat']:.6f}, {result['lon']:.6f}"
+                    )
                     st.rerun()
         except ImportError:
             st.error("`streamlit-js-eval` not installed. GPS unavailable.")
             st.session_state._gps_pending = False
 
-    if st.session_state.gps_lat is not None and st.session_state.gps_lon is not None:
-        st.success(
-            f"📍 {st.session_state.gps_lat:.6f}, {st.session_state.gps_lon:.6f}"
-        )
-        gps_note = st.text_input("Note (optional)", key="gps_note_input")
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            if st.button("💾 Save Point", use_container_width=True):
-                new_point = {
-                    "uprn": st.session_state.selected_uprn,
-                    "lat": st.session_state.gps_lat,
-                    "lon": st.session_state.gps_lon,
-                    "note": gps_note,
-                    "timestamp": datetime.now().isoformat(),
-                }
-                points.append(new_point)
-                save_json(POINTS_FILE, points)
-                st.session_state.gps_lat = None
-                st.session_state.gps_lon = None
-                st.rerun()
-        with col_b:
-            if st.button("❌ Cancel", use_container_width=True):
-                st.session_state.gps_lat = None
-                st.session_state.gps_lon = None
-                st.rerun()
+    # Optional note that gets attached to next GPS save
+    gps_note = st.text_input("Note for next point (optional)", key="_gps_note")
+    if gps_note:
+        st.session_state._gps_note = gps_note
 
     st.divider()
 
