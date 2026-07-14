@@ -154,34 +154,56 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
             fields=["display_name", "uprn", "owner"],
             aliases=["Name:", "UPRN:", "Owner:"],
             sticky=False,
+            style="font-size:11px;padding:4px 6px;max-width:180px;",
         ),
         name="parcels",
         highlight_function=lambda x: {"weight": 3, "fillOpacity": 0.50},
     ).add_to(m)
 
-    # UPRN text labels at centroids
+    # UPRN text labels — injected via JS as non-interactive Leaflet markers
+    # so they never intercept clicks meant for the GeoJSON parcel layer
     if show_labels:
+        labels_data = []
         for feat in parcels["features"]:
             uprn = feat["properties"]["uprn"]
             c = polygon_centroid(feat)
             if c is None:
                 continue
-            label_html = (
-                f'<div style="font-size:10px;font-weight:bold;color:#222;'
-                f'text-shadow:0 0 3px #fff,0 0 3px #fff;'
-                f'white-space:nowrap;pointer-events:none;">{uprn}</div>'
-            )
-            folium.Marker(
-                location=[c[1], c[0]],
-                icon=folium.DivIcon(
-                    html=label_html, icon_size=(40, 14), icon_anchor=(20, 7)
-                ),
-            ).add_to(m)
-        # Make all div-based markers transparent to clicks
-        m.get_root().header.add_child(
-            folium.Element(
-                "<style>div.leaflet-marker-icon{pointer-events:none!important}</style>"
-            )
+            labels_data.append([c[1], c[0], str(uprn)])
+
+        labels_json = json.dumps(labels_data)
+        m.get_root().html.add_child(
+            folium.Element(f"""
+<script>
+(function() {{
+    var _labels = {labels_json};
+    var _tries = 0;
+    function _addLabels() {{
+        var maps = document.querySelectorAll('.folium-map');
+        if (!maps.length || !maps[0]._leaflet_map) {{
+            if (++_tries < 100) setTimeout(_addLabels, 200);
+            return;
+        }}
+        var _map = maps[0]._leaflet_map;
+        _labels.forEach(function(l) {{
+            L.marker([l[0], l[1]], {{
+                icon: L.divIcon({{
+                    html: '<div style="font-size:10px;font-weight:bold;color:#222;text-shadow:0 0 3px #fff,0 0 3px #fff;white-space:nowrap;pointer-events:none;">' + l[2] + '</div>',
+                    iconSize: [40, 14],
+                    iconAnchor: [20, 7],
+                    className: ''
+                }}),
+                interactive: false,
+                keyboard: false,
+                bubblingMouseEvents: false
+            }}).addTo(_map);
+        }});
+    }}
+    if (document.readyState === 'complete') _addLabels();
+    else window.addEventListener('load', _addLabels);
+}})();
+</script>
+""")
         )
 
     # Collected GPS points
