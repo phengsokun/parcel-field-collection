@@ -353,7 +353,7 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
 # ── Layout ───────────────────────────────────────────────────
 import copy
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource
 def _cached_build_map(owners_json, points_json, show_labels, center_json, zoom):
     """Cache the folium Map object. When inputs are identical
     (e.g. parcel click without pan/zoom), Streamlit sees identical
