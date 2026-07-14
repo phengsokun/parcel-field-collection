@@ -35,6 +35,52 @@ def save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    # Also persist to GitHub to survive container restarts
+    _persist_to_github(path, data)
+
+# ── GitHub persistence (survives Streamlit Cloud container restarts) ──
+import requests as _requests
+import base64 as _base64
+
+_GITHUB_TOKEN = None
+_GITHUB_REPO = "phengsokun/parcel-field-collection"
+
+def _get_github_token():
+    global _GITHUB_TOKEN
+    if _GITHUB_TOKEN is None:
+        _GITHUB_TOKEN = (
+            os.environ.get("GITHUB_TOKEN", "")
+            or st.secrets.get("GITHUB_TOKEN", "")
+        )
+    return _GITHUB_TOKEN
+
+def _persist_to_github(file_path, data):
+    """Push data file to GitHub repo so it survives container restarts."""
+    token = _get_github_token()
+    if not token:
+        return  # silently skip if no token configured
+    try:
+        rel_path = os.path.relpath(file_path, os.path.dirname(__file__)).replace("\\", "/")
+        url = f"https://api.github.com/repos/{_GITHUB_REPO}/contents/{rel_path}"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        # Get current SHA
+        r = _requests.get(url, headers=headers, timeout=10)
+        sha = r.json().get("sha") if r.status_code == 200 else None
+        payload = {
+            "message": f"auto: update {rel_path}",
+            "content": _base64.b64encode(
+                json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+            ).decode("ascii"),
+        }
+        if sha:
+            payload["sha"] = sha
+        _requests.put(url, json=payload, headers=headers, timeout=15)
+    except Exception:
+        pass  # never block the app for persistence failures
 
 # ── Load data ────────────────────────────────────────────────
 if not os.path.exists(PARCELS_FILE):

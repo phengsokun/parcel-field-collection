@@ -3,3 +3,4 @@ streamlit-folium
 folium
 streamlit-js-eval
 shapely
+requests
