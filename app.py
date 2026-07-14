@@ -101,7 +101,6 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
     lons = [c[0] for c in all_coords]
 
     m = folium.Map(tiles=None)
-    
     if center and zoom:
         m.location = [center["lat"], center["lng"]]
         m.zoom_start = zoom
@@ -307,19 +306,28 @@ if st.session_state.get("_gps_pending"):
 col_map, col_panel = st.columns([3, 1])
 
 with col_map:
-    # Restore previous view if available so map doesn't jump on rerun
-    view_center = st.session_state.get("_map_center")
-    view_zoom = st.session_state.get("_map_zoom")
+    # Use saved view if valid (not the bogus {lat:0,lng:0} from initial load)
+    saved_center = st.session_state.get("_map_center")
+    saved_zoom = st.session_state.get("_map_zoom")
+    # Validate: center must be within +-20 degrees of parcel area to be usable
+    if saved_center and saved_zoom:
+        clat, clng = saved_center.get("lat", 0), saved_center.get("lng", 0)
+        if abs(clat) < 1 and abs(clng) < 1:  # near 0,0 = bogus default
+            saved_center = None
+            saved_zoom = None
+
     m = build_map(parcels, owners, points, st.session_state.selected_uprn,
                   st.session_state.show_labels,
-                  center=view_center, zoom=view_zoom)
-    map_data = st_folium(m, width=None, height=620)
+                  center=saved_center, zoom=saved_zoom)
+    map_data = st_folium(m, width=None, height=620, key="folium_map")
     st.session_state._map_data = map_data
-    # Save current view for next render
-    if map_data.get("center"):
-        st.session_state._map_center = map_data["center"]
-    if map_data.get("zoom"):
-        st.session_state._map_zoom = map_data["zoom"]
+
+    # Save view for next render, but only if it looks real
+    if map_data.get("center") and map_data.get("zoom"):
+        c = map_data["center"]
+        if abs(c.get("lat", 0)) > 1 or abs(c.get("lng", 0)) > 1:
+            st.session_state._map_center = c
+            st.session_state._map_zoom = map_data["zoom"]
 
 # ── DEBUG: show raw map_data ─────────────────────────────
 with st.expander("🔧 Debug: st_folium return data", expanded=False):
@@ -370,7 +378,8 @@ if map_data.get("last_object_clicked"):
                 )
                 st.session_state._last_click_uprn = new_uprn
                 st.session_state._dialog_open = True
-                st.rerun()
+                # No st.rerun() — dialog renders on this same cycle,
+                # map stays at its current view.
 
 if st.session_state.get("_dialog_open"):
     owner_dialog(st.session_state.selected_uprn, st.session_state.selected_display_name)
