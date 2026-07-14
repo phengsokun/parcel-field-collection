@@ -130,8 +130,8 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
             }
         if has_owner:
             return {
-                "color": "#2ca02c", "weight": 2,
-                "fillColor": "#2ca02c", "fillOpacity": 0.15,
+                "color": "#d62728", "weight": 2,
+                "fillColor": "#d62728", "fillOpacity": 0.25,
             }
         return {
             "color": "#3388ff", "weight": 2,
@@ -192,7 +192,8 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
             c = polygon_centroid(feat)
             if c is None:
                 continue
-            labels_data.append([c[1], c[0], str(uprn)])
+            has_owner = uprn in owners and owners[uprn].strip()
+            labels_data.append([c[1], c[0], str(uprn), has_owner])
 
         labels_json = json.dumps(labels_data)
         m.get_root().html.add_child(
@@ -216,7 +217,7 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
         }}
         _labels.forEach(function(l) {{
             var icon = L.divIcon({{
-                html: '<div style="font-size:10px;font-weight:bold;color:#222;text-shadow:0 0 3px #fff,0 0 3px #fff;white-space:nowrap;">' + l[2] + '</div>',
+                html: '<div style="font-size:10px;font-weight:bold;color:' + (l[3] ? '#d62728' : '#222') + ';text-shadow:0 0 3px #fff,0 0 3px #fff;white-space:nowrap;">' + l[2] + '</div>',
                 iconSize: [40, 14],
                 iconAnchor: [20, 7],
                 className: ''
