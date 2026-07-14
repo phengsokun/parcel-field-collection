@@ -52,6 +52,7 @@ defaults = {
     "_last_click_uprn": None,
     "_gps_note": "",
     "show_labels": True,
+    "_dialog_open": False,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -279,6 +280,53 @@ with col_map:
     map_data = st_folium(m, width=None, height=620)
     st.session_state._map_data = map_data
 
+# ── Detect map click & trigger owner dialog ───────────────
+@st.dialog("✏️ Assign Owner", width="small")
+def owner_dialog(uprn, display_name):
+    st.markdown(f"**{display_name}**")
+    st.caption(f"UPRN: `{uprn}`")
+    current = owners.get(uprn, "").strip()
+    if current:
+        st.caption(f"Current owner: ✅ {current}")
+    new_owner = st.text_input(
+        "Owner name", value=current,
+        key=f"dlg_owner_{uprn}",
+        placeholder="e.g. Sok Dara",
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("💾 Save", use_container_width=True):
+            cleaned = new_owner.strip()
+            if cleaned:
+                owners[uprn] = cleaned
+            elif uprn in owners:
+                del owners[uprn]
+            save_json(OWNERS_FILE, owners)
+            st.session_state._dialog_open = False
+            st.rerun()
+    with c2:
+        if st.button("Cancel", use_container_width=True):
+            st.session_state._dialog_open = False
+            st.rerun()
+
+if map_data.get("last_object_clicked"):
+    clicked = map_data["last_object_clicked"]
+    if isinstance(clicked, dict):
+        props = clicked.get("properties", clicked)
+        if props and "uprn" in props:
+            new_uprn = props["uprn"]
+            if new_uprn != st.session_state.get("_last_click_uprn"):
+                st.session_state.selected_uprn = new_uprn
+                st.session_state.selected_display_name = props.get(
+                    "display_name", f"Parcel {new_uprn}"
+                )
+                st.session_state._last_click_uprn = new_uprn
+                st.session_state._dialog_open = True
+                st.rerun()
+
+if st.session_state.get("_dialog_open"):
+    owner_dialog(st.session_state.selected_uprn, st.session_state.selected_display_name)
+
 # ── Fragment: Sidebar ─────────────────────────────────────
 @st.fragment
 def render_sidebar():
@@ -350,24 +398,7 @@ def render_sidebar():
 # ── Fragment: Panel ───────────────────────────────────────
 @st.fragment
 def render_panel():
-    md = st.session_state.get("_map_data") or {}
-
     with col_panel:
-        # Handle map click
-        if md.get("last_object_clicked"):
-            clicked = md["last_object_clicked"]
-            if isinstance(clicked, dict):
-                props = clicked.get("properties", clicked)
-                if props and "uprn" in props:
-                    new_uprn = props["uprn"]
-                    if new_uprn != st.session_state._last_click_uprn:
-                        st.session_state.selected_uprn = new_uprn
-                        st.session_state.selected_display_name = props.get(
-                            "display_name", f"Parcel {new_uprn}"
-                        )
-                        st.session_state._last_click_uprn = new_uprn
-                        st.rerun()
-
         st.subheader("📋 Parcel Details")
 
         if st.session_state.selected_uprn:
@@ -379,24 +410,7 @@ def render_panel():
             if current_owner:
                 st.markdown(f"**Owner:** ✅ {current_owner}")
             else:
-                st.warning("⚠️ No owner assigned — type a name below and save.")
-
-            st.divider()
-
-            new_owner = st.text_input(
-                "Owner name",
-                value=current_owner,
-                key="owner_input",
-                placeholder="e.g. Sok Dara",
-            )
-            if st.button("💾 Save Owner", use_container_width=True):
-                cleaned = new_owner.strip()
-                if cleaned:
-                    owners[uprn] = cleaned
-                elif uprn in owners:
-                    del owners[uprn]
-                save_json(OWNERS_FILE, owners)
-                st.rerun()
+                st.info("No owner — click the parcel on the map to assign one.")
 
             parcel_pts = [p for p in points if p.get("uprn") == uprn]
             if parcel_pts:
