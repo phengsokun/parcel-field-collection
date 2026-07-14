@@ -104,8 +104,10 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
     if center and zoom:
         m.location = [center["lat"], center["lng"]]
         m.zoom_start = zoom
+        st.session_state._build_used = f"center={center}, zoom={zoom}"
     else:
         m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
+        st.session_state._build_used = "fit_bounds"
 
     folium.TileLayer(
         tiles="OpenStreetMap",
@@ -309,10 +311,10 @@ with col_map:
     # Use saved view if valid (not the bogus {lat:0,lng:0} from initial load)
     saved_center = st.session_state.get("_map_center")
     saved_zoom = st.session_state.get("_map_zoom")
-    # Validate: center must be within +-20 degrees of parcel area to be usable
+    # Validate: center must be away from 0,0 to be usable
     if saved_center and saved_zoom:
         clat, clng = saved_center.get("lat", 0), saved_center.get("lng", 0)
-        if abs(clat) < 1 and abs(clng) < 1:  # near 0,0 = bogus default
+        if abs(clat) < 1 and abs(clng) < 1:
             saved_center = None
             saved_zoom = None
 
@@ -322,19 +324,22 @@ with col_map:
     map_data = st_folium(m, width=None, height=620, key="folium_map")
     st.session_state._map_data = map_data
 
-    # Save view for next render, but only if it looks real
-    if map_data.get("center") and map_data.get("zoom"):
-        c = map_data["center"]
-        if abs(c.get("lat", 0)) > 1 or abs(c.get("lng", 0)) > 1:
-            st.session_state._map_center = c
-            st.session_state._map_zoom = map_data["zoom"]
+    # Only save view from pan/zoom events — NOT from clicks (which may
+    # carry bogus center data from st_folium)
+    if not map_data.get("last_object_clicked"):
+        if map_data.get("center") and map_data.get("zoom"):
+            c = map_data["center"]
+            if abs(c.get("lat", 0)) > 1 or abs(c.get("lng", 0)) > 1:
+                st.session_state._map_center = c
+                st.session_state._map_zoom = map_data["zoom"]
 
 # ── DEBUG: show raw map_data ─────────────────────────────
 with st.expander("🔧 Debug", expanded=False):
-    st.json(map_data)
-    st.write("selected_uprn:", st.session_state.get("selected_uprn"))
+    st.write("build_map used:", st.session_state.get("_build_used", "?"))
     st.write("saved_center:", st.session_state.get("_map_center"))
     st.write("saved_zoom:", st.session_state.get("_map_zoom"))
+    st.write("map_data keys:", list(map_data.keys()) if map_data else "empty")
+    st.json({k: v for k, v in map_data.items() if k not in ("all_drawings", "bounds")} if map_data else {})
 
 # ── Detect map click & trigger owner dialog ───────────────
 @st.dialog("✏️ Assign Owner", width="small")
