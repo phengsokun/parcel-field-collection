@@ -161,9 +161,15 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
             folium.Marker(
                 location=[c[1], c[0]],
                 icon=folium.DivIcon(
-                    html=label_html, icon_size=(80, 14), icon_anchor=(40, 7)
+                    html=label_html, icon_size=(40, 14), icon_anchor=(20, 7)
                 ),
             ).add_to(m)
+        # Make all div-based markers transparent to clicks
+        m.get_root().header.add_child(
+            folium.Element(
+                "<style>div.leaflet-marker-icon{pointer-events:none!important}</style>"
+            )
+        )
 
     # Collected GPS points
     for pt in points:
