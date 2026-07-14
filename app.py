@@ -112,7 +112,8 @@ def find_parcel_at_point(lat, lng, parcels):
 
 
 # ── Map builder ──────────────────────────────────────────────
-def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
+def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
+              saved_bounds=None):
     # Compute bounds from all parcel coordinates
     all_coords = []
     for feat in parcels["features"]:
@@ -131,7 +132,10 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
     avg_lon = sum(lons) / len(lons)
 
     m = folium.Map(tiles=None, location=[avg_lat, avg_lon], zoom_start=14)
-    m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
+    if saved_bounds and len(saved_bounds) == 2:
+        m.fit_bounds(saved_bounds)
+    else:
+        m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
 
     folium.TileLayer(
         tiles="OpenStreetMap",
@@ -293,59 +297,6 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
 
     folium.LayerControl().add_to(m)
 
-    # JS to preserve map view across Streamlit reruns.
-    # Saves bounds to sessionStorage on every move/zoom, restores on load.
-    m.get_root().html.add_child(
-        folium.Element("""
-<script>
-(function() {
-    var _tries = 0;
-    function _initMap() {
-        var maps = document.querySelectorAll('.folium-map');
-        if (!maps.length || !maps[0]._leaflet_map) {
-            if (++_tries < 100) setTimeout(_initMap, 100);
-            return;
-        }
-        var map = maps[0]._leaflet_map;
-
-        // Restore saved bounds if available (from a rerun)
-        var saved = sessionStorage.getItem('_m_b');
-        if (saved) {
-            try {
-                var b = JSON.parse(saved);
-                map.fitBounds([[b._s, b._w], [b._n, b._e]], {animate: false});
-                sessionStorage.removeItem('_m_b');
-            } catch(e) {}
-        }
-
-        // Save bounds on every pan/zoom so the next rerun can restore
-        function _save() {
-            var bounds = map.getBounds();
-            sessionStorage.setItem('_m_b', JSON.stringify({
-                _s: bounds.getSouth(),
-                _w: bounds.getWest(),
-                _n: bounds.getNorth(),
-                _e: bounds.getEast()
-            }));
-        }
-        map.on('moveend zoomend', _save);
-
-        // Also save aggressively: on dialog interactions the page may rerun
-        // without firing moveend, so save on any click in the document
-        document.addEventListener('click', function() {
-            setTimeout(_save, 50);
-        }, true);
-
-        // Save immediately on page unload (dialog rerun may trigger this)
-        window.addEventListener('beforeunload', _save);
-    }
-    if (document.readyState === 'complete') _initMap();
-    else window.addEventListener('load', _initMap);
-})();
-</script>
-""")
-    )
-
     return m
 
 # ── Layout ───────────────────────────────────────────────────
@@ -395,13 +346,19 @@ if st.session_state.get("_gps_pending"):
 col_map, col_panel = st.columns([3, 1])
 
 with col_map:
+    saved_bounds = st.session_state.get("_saved_bounds")
     m = build_map(parcels, owners, points, st.session_state.selected_uprn,
-                  st.session_state.show_labels)
+                  st.session_state.show_labels, saved_bounds=saved_bounds)
     map_data = st_folium(m, width=None, height=620, key="folium_map")
     st.session_state._map_data = map_data
+    # Save bounds from THIS render so the next render (dialog typing/close)
+    # can restore the exact same view — no JS timing issues.
+    if map_data.get("bounds"):
+        st.session_state._saved_bounds = map_data["bounds"]
 
 # ── DEBUG: show raw map_data ─────────────────────────────
 with st.expander("🔧 Debug", expanded=False):
+    st.write("saved_bounds:", st.session_state.get("_saved_bounds"))
     st.write("map_data keys:", list(map_data.keys()) if map_data else "empty")
     st.json({k: v for k, v in map_data.items() if k not in ("all_drawings", "bounds")} if map_data else {})
 
