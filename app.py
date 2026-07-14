@@ -190,13 +190,6 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
         overlay=False,
     ).add_to(m)
 
-    folium.TileLayer(
-        tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
-        name="Google Satellite",
-        attr="Google",
-        overlay=False,
-    ).add_to(m)
-
     def style_fn(feature):
         uprn = feature["properties"]["uprn"]
         entry = owners.get(uprn)
@@ -345,8 +338,6 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
         keepCurrentZoomLevel=True,
         strings={"title": "📍 Use my location", "popup": "You are here"},
     ).add_to(m)
-
-    folium.LayerControl().add_to(m)
 
     return m
 
