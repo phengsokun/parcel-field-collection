@@ -238,87 +238,41 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
         highlight_function=lambda x: {"weight": 3, "fillOpacity": 0.50},
     ).add_to(m)
 
-    # UPRN text labels at centroids — use folium CircleMarker with
-    # permanent tooltips. Zero-radius invisible markers that don't
-    # intercept clicks, with always-visible labels beside them.
+    # UPRN text labels at centroids using DivIcon markers.
+    # CSS pointer-events:none ensures clicks pass through to GeoJSON parcels.
     if show_labels:
+        # Inject CSS so label markers don't intercept clicks
+        m.get_root().html.add_child(
+            folium.Element("""
+<style>
+.uprn-label, .uprn-label * {
+    pointer-events: none !important;
+}
+</style>
+""")
+        )
         for feat in parcels["features"]:
             uprn = feat["properties"]["uprn"]
             c = polygon_centroid(feat)
             if c is None:
                 continue
-            folium.CircleMarker(
+            entry = owners.get(uprn)
+            o_name = (entry.get("name") or "").strip() if entry else ""
+            if o_name:
+                label_text = f"{uprn} - {o_name}"
+                color = "#d62728"
+            else:
+                label_text = str(uprn)
+                color = "#222"
+            folium.Marker(
                 location=[c[1], c[0]],
-                radius=0,
-                fill=False,
-                color="transparent",
-                weight=0,
-                interactive=False,
+                icon=folium.DivIcon(
+                    html=f'<div style="font-size:10px;font-weight:bold;color:{color};text-shadow:0 0 3px #fff,0 0 3px #fff;white-space:nowrap;">{label_text}</div>',
+                    icon_size=(120, 14),
+                    icon_anchor=(60, 7),
+                    class_name="uprn-label",
+                ),
             ).add_to(m)
-
-        # Add labels as JS-injected text in a custom pane BELOW the overlay pane
-        # so clicks always pass through to GeoJSON parcels.
-        labels_data = []
-        for feat in parcels["features"]:
-            try:
-                uprn = feat["properties"]["uprn"]
-                c = polygon_centroid(feat)
-                if c is None:
-                    continue
-                entry = owners.get(uprn)
-                o_name = (entry.get("name") or "").strip() if entry else ""
-                if o_name:
-                    label_text = f"{uprn} - {o_name}"
-                    color = "#d62728"
-                else:
-                    label_text = str(uprn)
-                    color = "#222"
-                labels_data.append([c[1], c[0], label_text, color])
-            except Exception:
-                continue
-
-        labels_json = json.dumps(labels_data)
-        m.get_root().html.add_child(
-            folium.Element(f"""
-<script>
-(function() {{
-    var _labels = {labels_json};
-    var _tries = 0;
-    function _addLabels() {{
-        var maps = document.querySelectorAll('.folium-map');
-        if (!maps.length || !maps[0]._leaflet_map) {{
-            if (++_tries < 100) setTimeout(_addLabels, 200);
-            return;
-        }}
-        var _map = maps[0]._leaflet_map;
-        // Create a custom pane with z-index between tilePane (200) and overlayPane (400)
-        if (!_map.getPane('labelPane')) {{
-            _map.createPane('labelPane');
-            _map.getPane('labelPane').style.zIndex = 300;
-            _map.getPane('labelPane').style.pointerEvents = 'none';
-        }}
-        _labels.forEach(function(l) {{
-            var icon = L.divIcon({{
-                html: '<div style="font-size:10px;font-weight:bold;color:' + l[3] + ';text-shadow:0 0 3px #fff,0 0 3px #fff;white-space:nowrap;">' + l[2] + '</div>',
-                iconSize: [80, 14],
-                iconAnchor: [40, 7],
-                className: ''
-            }});
-            L.marker([l[0], l[1]], {{
-                icon: icon,
-                interactive: false,
-                keyboard: false,
-                bubblingMouseEvents: false,
-                pane: 'labelPane'
-            }}).addTo(_map);
-        }});
-    }}
-    if (document.readyState === 'complete') _addLabels();
-    else window.addEventListener('load', _addLabels);
-}})();
-</script>
-""")
-        )
 
     # Collected GPS points
     for pt in points:
