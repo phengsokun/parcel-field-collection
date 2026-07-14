@@ -51,13 +51,41 @@ defaults = {
     "selected_display_name": None,
     "_last_click_uprn": None,
     "_gps_note": "",
+    "show_labels": True,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+# ── Helpers ──────────────────────────────────────────────────
+def polygon_centroid(feat):
+    """Approximate centroid from exterior ring — good enough for labelling."""
+    geom = feat["geometry"]
+    if geom["type"] == "Polygon":
+        ring = geom["coordinates"][0]
+    elif geom["type"] == "MultiPolygon":
+        ring = geom["coordinates"][0][0]
+    else:
+        return None
+    xs = [c[0] for c in ring]
+    ys = [c[1] for c in ring]
+    return sum(xs) / len(xs), sum(ys) / len(ys)
+
+
+def build_index(parcels):
+    """Build a lookup {display_name_lower: feature} and {uprn: feature}."""
+    by_name = {}
+    by_uprn = {}
+    for f in parcels["features"]:
+        uprn = f["properties"]["uprn"]
+        name = f["properties"]["display_name"]
+        by_uprn[uprn] = f
+        by_name.setdefault(name.lower(), []).append(f)
+    return by_name, by_uprn
+
+
 # ── Map builder ──────────────────────────────────────────────
-def build_map(parcels, owners, points, highlight_uprn=None):
+def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
     # Compute bounds from all parcel coordinates
     all_coords = []
     for feat in parcels["features"]:
@@ -74,31 +102,37 @@ def build_map(parcels, owners, points, highlight_uprn=None):
     m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
 
     def style_fn(feature):
-        if feature["properties"]["uprn"] == highlight_uprn:
+        uprn = feature["properties"]["uprn"]
+        has_owner = uprn in owners and owners[uprn].strip()
+        if uprn == highlight_uprn:
             return {
                 "color": "#ff0000", "weight": 4,
-                "fillColor": "#ff7800", "fillOpacity": 0.35,
+                "fillColor": "#ff7800", "fillOpacity": 0.40,
+            }
+        if has_owner:
+            return {
+                "color": "#2ca02c", "weight": 2,
+                "fillColor": "#2ca02c", "fillOpacity": 0.15,
             }
         return {
             "color": "#3388ff", "weight": 2,
-            "fillColor": "#3388ff", "fillOpacity": 0.12,
+            "fillColor": "#3388ff", "fillOpacity": 0.10,
         }
 
-    # Enrich features with owner info for tooltip
+    # Build enriched GeoJSON
     features = []
     for feat in parcels["features"]:
         uprn = feat["properties"]["uprn"]
-        owner = owners.get(uprn, "no owner set")
-        f = {
+        owner = owners.get(uprn, "").strip()
+        features.append({
             "type": "Feature",
             "geometry": feat["geometry"],
             "properties": {
                 "uprn": uprn,
                 "display_name": feat["properties"]["display_name"],
-                "owner": owner,
+                "owner": owner if owner else "no owner set",
             },
-        }
-        features.append(f)
+        })
 
     GeoJson(
         {"type": "FeatureCollection", "features": features},
@@ -109,10 +143,31 @@ def build_map(parcels, owners, points, highlight_uprn=None):
             sticky=False,
         ),
         name="parcels",
-        highlight_function=lambda x: {"weight": 3, "fillOpacity": 0.45},
+        highlight_function=lambda x: {"weight": 3, "fillOpacity": 0.50},
     ).add_to(m)
 
-    # Collected GPS points as markers
+    # UPRN text labels at centroids
+    if show_labels:
+        for feat in parcels["features"]:
+            uprn = feat["properties"]["uprn"]
+            owner = owners.get(uprn, "").strip()
+            c = polygon_centroid(feat)
+            if c is None:
+                continue
+            bg = "rgba(44,160,44,0.85)" if owner else "rgba(51,136,255,0.85)"
+            label_html = (
+                f'<div style="font-size:9px;font-weight:bold;color:#fff;'
+                f'background:{bg};padding:1px 4px;border-radius:3px;'
+                f'white-space:nowrap;pointer-events:none;">UPRN {uprn}</div>'
+            )
+            folium.Marker(
+                location=[c[1], c[0]],
+                icon=folium.DivIcon(
+                    html=label_html, icon_size=(80, 14), icon_anchor=(40, 7)
+                ),
+            ).add_to(m)
+
+    # Collected GPS points
     for pt in points:
         popup_html = (
             f"<b>UPRN:</b> {pt.get('uprn', 'none')}<br>"
@@ -125,7 +180,6 @@ def build_map(parcels, owners, points, highlight_uprn=None):
             icon=folium.Icon(color="green", icon="map-marker", prefix="fa"),
         ).add_to(m)
 
-    # Locate button directly on the map
     LocateControl(
         auto_start=False,
         keepCurrentZoomLevel=True,
@@ -139,7 +193,7 @@ def build_map(parcels, owners, points, highlight_uprn=None):
 col_map, col_panel = st.columns([3, 1])
 
 with col_map:
-    m = build_map(parcels, owners, points, st.session_state.selected_uprn)
+    m = build_map(parcels, owners, points, st.session_state.selected_uprn, st.session_state.show_labels)
     map_data = st_folium(m, width=None, height=620)
 
 with col_panel:
@@ -165,19 +219,22 @@ with col_panel:
     if st.session_state.selected_uprn:
         uprn = st.session_state.selected_uprn
         st.markdown(f"**UPRN:** `{uprn}`")
-        st.markdown(f"**Name:** {st.session_state.selected_display_name}")
+        st.markdown(f"**Parcel:** {st.session_state.selected_display_name}")
 
-        current_owner = owners.get(uprn, "")
-        st.markdown(
-            f"**Current Owner:** _{current_owner if current_owner else 'No owner set'}_"
-        )
+        current_owner = owners.get(uprn, "").strip()
+        if current_owner:
+            st.markdown(f"**Owner:** ✅ {current_owner}")
+        else:
+            st.warning("⚠️ No owner assigned — type a name below and save.")
 
         st.divider()
-        st.subheader("✏️ Update Owner")
-        new_owner = st.text_input(
-            "Owner name", value=current_owner, key="owner_input"
-        )
 
+        new_owner = st.text_input(
+            "Owner name",
+            value=current_owner,
+            key="owner_input",
+            placeholder="e.g. Sok Dara",
+        )
         if st.button("💾 Save Owner", use_container_width=True):
             cleaned = new_owner.strip()
             if cleaned:
@@ -185,6 +242,7 @@ with col_panel:
             elif uprn in owners:
                 del owners[uprn]
             save_json(OWNERS_FILE, owners)
+            st.success("✅ Saved!")
             st.rerun()
 
         # Show collected points for this parcel
@@ -198,10 +256,39 @@ with col_panel:
                 )
     else:
         st.info("Click a parcel on the map to select it.")
+        st.caption("🟢 Green parcels = owner assigned")
+        st.caption("🔵 Blue parcels = no owner yet")
 
 # ── Sidebar ──────────────────────────────────────────────────
 with st.sidebar:
     st.header("🔧 Tools")
+
+    # ── Search ──
+    st.subheader("🔍 Search Parcel")
+    search = st.text_input("Name or UPRN", key="search_input", placeholder="e.g. Parcel 42 or 42")
+    if search:
+        s = search.strip().lower()
+        matches = []
+        for f in parcels["features"]:
+            uprn = f["properties"]["uprn"]
+            name = f["properties"]["display_name"]
+            if s in name.lower() or s == uprn.lower():
+                owner = owners.get(uprn, "").strip()
+                matches.append((uprn, name, owner))
+        if matches:
+            for u, n, o in matches[:25]:
+                label = f"{n}  |  {o}" if o else f"{n}  |  —"
+                if st.button(label, key=f"srch_{u}", use_container_width=True):
+                    st.session_state.selected_uprn = u
+                    st.session_state.selected_display_name = n
+                    st.session_state._last_click_uprn = u
+                    st.rerun()
+        else:
+            st.caption("No matches")
+    st.divider()
+
+    # ── UPRN Labels ──
+    st.checkbox("Show UPRN labels on map", value=st.session_state.show_labels, key="show_labels")
 
     # ── GPS ──
     st.subheader("📍 Save Location")
