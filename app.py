@@ -301,6 +301,20 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
     return m
 
 # ── Layout ───────────────────────────────────────────────────
+import copy
+
+@st.cache_resource
+def _cached_build_map(_owners_json, _points_json, _show_labels, _center_json, _zoom):
+    """Cache the folium Map object. Returns a deep copy so st_folium
+    doesn't mutate the cached instance. When inputs are identical
+    (e.g. parcel click without pan/zoom), Streamlit sees identical
+    component data and keeps the existing iframe → ZERO flicker."""
+    _owners = json.loads(_owners_json)
+    _points = json.loads(_points_json)
+    _center = json.loads(_center_json) if _center_json else None
+    return build_map(parcels, _owners, _points, highlight_uprn=None,
+                     show_labels=_show_labels,
+                     saved_center=_center, saved_zoom=_zoom)
 
 # ── GPS eval (must run in main flow for JS bridge) ────────
 if st.session_state.get("_gps_pending"):
@@ -344,16 +358,21 @@ if st.session_state.get("_gps_pending"):
         st.session_state._gps_pending = False
 
 # ── Map ───────────────────────────────────────────────────
-# Build map WITHOUT highlight — keeps map inputs identical on click,
-# so st_folium reuses the same iframe → zero flicker when dialog opens.
+# Cached map object: when inputs are identical (click without pan/zoom),
+# deep copy produces same HTML → Streamlit keeps the iframe → no flicker.
 col_map, col_panel = st.columns([3, 1])
 
 with col_map:
     saved_center = st.session_state.get("_saved_center")
     saved_zoom = st.session_state.get("_saved_zoom")
-    m = build_map(parcels, owners, points, highlight_uprn=None,
-                  show_labels=st.session_state.show_labels,
-                  saved_center=saved_center, saved_zoom=saved_zoom)
+    cached = _cached_build_map(
+        json.dumps(owners, sort_keys=True),
+        json.dumps(points, sort_keys=True),
+        st.session_state.show_labels,
+        json.dumps(saved_center, sort_keys=True) if saved_center else "null",
+        saved_zoom,
+    )
+    m = copy.deepcopy(cached)
     map_data = st_folium(m, width=None, height=620, key="folium_map")
     st.session_state._map_data = map_data
     if map_data.get("center") and map_data.get("zoom") and map_data["zoom"] > 2:
