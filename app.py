@@ -10,7 +10,7 @@ from datetime import datetime
 # ── Page config ──────────────────────────────────────────────
 st.set_page_config(page_title="Parcel Field Collection", layout="wide")
 st.markdown(
-    "<h3 style='margin-top:0;padding-top:0'>📍 Parcel Field Collection</h3>",
+    "<h5 style='margin-top:0;padding-top:0'>📍 ចំរើនទ្រព្យ</h5>",
     unsafe_allow_html=True,
 )
 
@@ -42,7 +42,33 @@ if not os.path.exists(PARCELS_FILE):
     st.stop()
 
 parcels = load_geojson(PARCELS_FILE)
-owners = load_json(OWNERS_FILE, {})
+owners_raw = load_json(OWNERS_FILE, {})
+
+# Migrate old format {uprn: "name"} → {uprn: {name, assigned_at}}
+# and provide a helper to read owner names safely
+owners = {}
+for uprn, val in owners_raw.items():
+    if isinstance(val, str):
+        owners[uprn] = {"name": val, "assigned_at": ""}
+    elif isinstance(val, dict):
+        owners[uprn] = val
+    else:
+        owners[uprn] = {"name": "", "assigned_at": ""}
+# Save back if migration happened
+if any(isinstance(v, str) for v in owners_raw.values()):
+    save_json(OWNERS_FILE, owners)
+
+def owner_name(uprn):
+    """Return the owner display name for a UPRN, or empty string."""
+    entry = owners.get(uprn)
+    if entry is None:
+        return ""
+    return (entry.get("name") or "").strip()
+
+def has_owner(uprn):
+    """True if parcel has a non-empty owner assigned."""
+    return bool(owner_name(uprn))
+
 points = load_json(POINTS_FILE, [])
 
 # ── Session state ────────────────────────────────────────────
@@ -122,13 +148,13 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
 
     def style_fn(feature):
         uprn = feature["properties"]["uprn"]
-        has_owner = uprn in owners and owners[uprn].strip()
+        owned = has_owner(uprn)
         if uprn == highlight_uprn:
             return {
                 "color": "#ff0000", "weight": 4,
                 "fillColor": "#ff7800", "fillOpacity": 0.40,
             }
-        if has_owner:
+        if owned:
             return {
                 "color": "#d62728", "weight": 2,
                 "fillColor": "#d62728", "fillOpacity": 0.25,
@@ -142,14 +168,13 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
     features = []
     for feat in parcels["features"]:
         uprn = feat["properties"]["uprn"]
-        owner = owners.get(uprn, "").strip()
         features.append({
             "type": "Feature",
             "geometry": feat["geometry"],
             "properties": {
                 "uprn": uprn,
                 "display_name": feat["properties"]["display_name"],
-                "owner": owner if owner else "no owner set",
+                "owner": owner_name(uprn) if owner_name(uprn) else "no owner set",
             },
         })
 
@@ -192,8 +217,8 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
             c = polygon_centroid(feat)
             if c is None:
                 continue
-            has_owner = uprn in owners and owners[uprn].strip()
-            labels_data.append([c[1], c[0], str(uprn), has_owner])
+            has_owner_flag = has_owner(uprn)
+            labels_data.append([c[1], c[0], str(uprn), has_owner_flag])
 
         labels_json = json.dumps(labels_data)
         m.get_root().html.add_child(
@@ -293,21 +318,17 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
                 _n: bounds.getNorth(),
                 _e: bounds.getEast()
             }));
-            // Also save after a short delay so the final view is captured
-            clearTimeout(map.__saveTimeout);
-            map.__saveTimeout = setTimeout(function() {
-                var b2 = map.getBounds();
-                sessionStorage.setItem('_m_b', JSON.stringify({
-                    _s: b2.getSouth(), _w: b2.getWest(),
-                    _n: b2.getNorth(), _e: b2.getEast()
-                }));
-            }, 500);
         }
         map.on('moveend zoomend', _save);
-        // Also save after fitBounds completes
-        _save();
-        setTimeout(_save, 300);
-        setTimeout(_save, 800);
+
+        // Also save aggressively: on dialog interactions the page may rerun
+        // without firing moveend, so save on any click in the document
+        document.addEventListener('click', function() {
+            setTimeout(_save, 50);
+        }, true);
+
+        // Save immediately on page unload (dialog rerun may trigger this)
+        window.addEventListener('beforeunload', _save);
     }
     if (document.readyState === 'complete') _initMap();
     else window.addEventListener('load', _initMap);
@@ -380,7 +401,7 @@ with st.expander("🔧 Debug", expanded=False):
 def owner_dialog(uprn, display_name):
     st.markdown(f"**{display_name}**")
     st.caption(f"UPRN: `{uprn}`")
-    current = owners.get(uprn, "").strip()
+    current = owner_name(uprn)
     if current:
         st.caption(f"Current owner: ✅ {current}")
     new_owner = st.text_input(
@@ -393,7 +414,7 @@ def owner_dialog(uprn, display_name):
         if st.button("💾 Save", use_container_width=True):
             cleaned = new_owner.strip()
             if cleaned:
-                owners[uprn] = cleaned
+                owners[uprn] = {"name": cleaned, "assigned_at": datetime.now().isoformat()}
             elif uprn in owners:
                 del owners[uprn]
             save_json(OWNERS_FILE, owners)
@@ -446,8 +467,8 @@ def render_sidebar():
                 uprn = f["properties"]["uprn"]
                 name = f["properties"]["display_name"]
                 if s in name.lower() or s == uprn.lower():
-                    owner = owners.get(uprn, "").strip()
-                    matches.append((uprn, name, owner))
+                    o = owner_name(uprn)
+                    matches.append((uprn, name, o))
             if matches:
                 for u, n, o in matches[:25]:
                     label = f"{n}  |  {o}" if o else f"{n}  |  —"
@@ -495,7 +516,7 @@ def render_sidebar():
 
         st.subheader("📊 Stats")
         st.metric("Parcels", len(parcels["features"]))
-        st.metric("Owners assigned", len([o for o in owners.values() if o]))
+        st.metric("Owners assigned", len([o for o in owners.values() if o.get("name", "").strip()]))
         st.metric("Points collected", len(points))
 
 
@@ -510,7 +531,7 @@ def render_panel():
             st.markdown(f"**UPRN:** `{uprn}`")
             st.markdown(f"**Parcel:** {st.session_state.selected_display_name}")
 
-            current_owner = owners.get(uprn, "").strip()
+            current_owner = owner_name(uprn)
             if current_owner:
                 st.markdown(f"**Owner:** ✅ {current_owner}")
             else:
