@@ -98,8 +98,21 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
     lats = [c[1] for c in all_coords]
     lons = [c[0] for c in all_coords]
 
-    m = folium.Map(tiles="OpenStreetMap")
+    m = folium.Map(tiles=None)
     m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
+
+    folium.TileLayer(
+        tiles="OpenStreetMap",
+        name="OpenStreetMap",
+        overlay=False,
+    ).add_to(m)
+
+    folium.TileLayer(
+        tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+        name="Google Satellite",
+        attr="Google",
+        overlay=False,
+    ).add_to(m)
 
     def style_fn(feature):
         uprn = feature["properties"]["uprn"]
