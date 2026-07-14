@@ -213,12 +213,21 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
         # so clicks always pass through to GeoJSON parcels.
         labels_data = []
         for feat in parcels["features"]:
-            uprn = feat["properties"]["uprn"]
-            c = polygon_centroid(feat)
-            if c is None:
+            try:
+                uprn = feat["properties"]["uprn"]
+                c = polygon_centroid(feat)
+                if c is None:
+                    continue
+                o_name = owner_name(uprn)
+                if o_name:
+                    label_text = f"{uprn} - {o_name}"
+                    color = "#d62728"
+                else:
+                    label_text = str(uprn)
+                    color = "#222"
+                labels_data.append([c[1], c[0], label_text, color])
+            except Exception:
                 continue
-            has_owner_flag = has_owner(uprn)
-            labels_data.append([c[1], c[0], str(uprn), has_owner_flag])
 
         labels_json = json.dumps(labels_data)
         m.get_root().html.add_child(
@@ -242,9 +251,9 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
         }}
         _labels.forEach(function(l) {{
             var icon = L.divIcon({{
-                html: '<div style="font-size:10px;font-weight:bold;color:' + (l[3] ? '#d62728' : '#222') + ';text-shadow:0 0 3px #fff,0 0 3px #fff;white-space:nowrap;">' + l[2] + '</div>',
-                iconSize: [40, 14],
-                iconAnchor: [20, 7],
+                html: '<div style="font-size:10px;font-weight:bold;color:' + l[3] + ';text-shadow:0 0 3px #fff,0 0 3px #fff;white-space:nowrap;">' + l[2] + '</div>',
+                iconSize: [80, 14],
+                iconAnchor: [40, 7],
                 className: ''
             }});
             L.marker([l[0], l[1]], {{
