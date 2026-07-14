@@ -124,6 +124,8 @@ defaults = {
     "_last_click_uprn": None,
     "_gps_note": "",
     "show_labels": True,
+    "_saved_center": None,
+    "_saved_zoom": None,
     "_dialog_open": False,
 }
 for k, v in defaults.items():
@@ -156,6 +158,24 @@ def find_parcel_at_point(lat, lng, parcels):
             return feat
     return None
 
+
+# ── Pre-compute map center from parcel data (anti-flicker) ──
+if st.session_state._saved_center is None:
+    all_coords = []
+    for feat in parcels["features"]:
+        geom = feat["geometry"]
+        if geom["type"] == "Polygon":
+            all_coords.extend(geom["coordinates"][0])
+        elif geom["type"] == "MultiPolygon":
+            for ring in geom["coordinates"]:
+                all_coords.extend(ring[0])
+    lats = [c[1] for c in all_coords]
+    lons = [c[0] for c in all_coords]
+    st.session_state._saved_center = {
+        "lat": round(sum(lats) / len(lats), 5),
+        "lng": round(sum(lons) / len(lons), 5),
+    }
+    st.session_state._saved_zoom = 14
 
 # ── Map builder ──────────────────────────────────────────────
 def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
@@ -369,9 +389,18 @@ with col_map:
     m = copy.deepcopy(cached)
     map_data = st_folium(m, width=None, height=620, key="folium_map")
     st.session_state._map_data = map_data
+    # Only update saved center/zoom on meaningful changes (prevents
+    # floating-point jitter from causing cache misses → flicker loop).
     if map_data.get("center") and map_data.get("zoom") and map_data["zoom"] > 2:
-        st.session_state._saved_center = map_data["center"]
-        st.session_state._saved_zoom = map_data["zoom"]
+        nc = map_data["center"]
+        nz = round(map_data["zoom"], 1)
+        sc = st.session_state._saved_center or {}
+        sz = st.session_state._saved_zoom or 0
+        if (abs(round(nc["lat"], 5) - round(sc.get("lat", 0), 5)) > 0.0003 or
+            abs(round(nc["lng"], 5) - round(sc.get("lng", 0), 5)) > 0.0003 or
+            abs(nz - round(sz, 1)) > 0.3):
+            st.session_state._saved_center = {"lat": round(nc["lat"], 5), "lng": round(nc["lng"], 5)}
+            st.session_state._saved_zoom = nz
 
 # Debug
 with st.expander("🔧 Debug", expanded=False):
