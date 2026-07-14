@@ -344,23 +344,23 @@ if st.session_state.get("_gps_pending"):
         st.session_state._gps_pending = False
 
 # ── Map ───────────────────────────────────────────────────
+# Build map WITHOUT highlight — keeps map inputs identical on click,
+# so st_folium reuses the same iframe → zero flicker when dialog opens.
 col_map, col_panel = st.columns([3, 1])
 
 with col_map:
     saved_center = st.session_state.get("_saved_center")
     saved_zoom = st.session_state.get("_saved_zoom")
-    m = build_map(parcels, owners, points, st.session_state.selected_uprn,
-                  st.session_state.show_labels,
+    m = build_map(parcels, owners, points, highlight_uprn=None,
+                  show_labels=st.session_state.show_labels,
                   saved_center=saved_center, saved_zoom=saved_zoom)
     map_data = st_folium(m, width=None, height=620, key="folium_map")
     st.session_state._map_data = map_data
-    # Save center+zoom from THIS render so the next render preserves exact view.
-    # Use center+zoom instead of fit_bounds — fit_bounds fails at high zoom levels.
     if map_data.get("center") and map_data.get("zoom") and map_data["zoom"] > 2:
         st.session_state._saved_center = map_data["center"]
         st.session_state._saved_zoom = map_data["zoom"]
 
-# ── DEBUG: show raw map_data ─────────────────────────────
+# Debug
 with st.expander("🔧 Debug", expanded=False):
     st.write("saved_center:", st.session_state.get("_saved_center"))
     st.write("saved_zoom:", st.session_state.get("_saved_zoom"))
@@ -368,21 +368,21 @@ with st.expander("🔧 Debug", expanded=False):
     st.json({k: v for k, v in map_data.items() if k not in ("all_drawings", "bounds")} if map_data else {})
 
 # ── Detect map click & trigger owner dialog ───────────────
-@st.dialog("✏️ Assign Owner", width="small")
+@st.dialog("✏️ បញ្ចូលម្ចាស់ដី", width="small")
 def owner_dialog(uprn, display_name):
     st.markdown(f"**{display_name}**")
-    st.caption(f"UPRN: `{uprn}`")
+    st.caption(f"លេខឡូតិ៍: `{uprn}`")
     current = owner_name(uprn)
     if current:
-        st.caption(f"Current owner: ✅ {current}")
+        st.caption(f"ម្ចាស់បច្ចុប្បន្ន: ✅ {current}")
     new_owner = st.text_input(
-        "Owner name", value=current,
+        "ឈ្មោះម្ចាស់", value=current,
         key=f"dlg_owner_{uprn}",
-        placeholder="e.g. Sok Dara",
+        placeholder="ឧ. សុខ ដារ៉ា",
     )
     c1, c2, c3 = st.columns(3)
     with c1:
-        if st.button("💾 Save", use_container_width=True):
+        if st.button("💾 រក្សាទុក", use_container_width=True):
             cleaned = new_owner.strip()
             if cleaned:
                 owners[uprn] = {"name": cleaned, "assigned_at": datetime.now().isoformat()}
@@ -392,14 +392,14 @@ def owner_dialog(uprn, display_name):
             st.session_state._dialog_open = False
             st.rerun()
     with c2:
-        if st.button("🗑️ Clear", use_container_width=True):
+        if st.button("🗑️ លុប", use_container_width=True):
             if uprn in owners:
                 del owners[uprn]
                 save_json(OWNERS_FILE, owners)
             st.session_state._dialog_open = False
             st.rerun()
     with c3:
-        if st.button("Cancel", use_container_width=True):
+        if st.button("បោះបង់", use_container_width=True):
             st.session_state._dialog_open = False
             st.rerun()
 
@@ -495,29 +495,29 @@ def render_sidebar():
 @st.fragment
 def render_panel():
     with col_panel:
-        st.subheader("📋 Parcel Details")
+        st.subheader("📋 ព័ត៌មានដីឡូតិ៍")
 
         if st.session_state.selected_uprn:
             uprn = st.session_state.selected_uprn
-            st.markdown(f"**UPRN:** `{uprn}`")
-            st.markdown(f"**Parcel:** {st.session_state.selected_display_name}")
+            st.markdown(f"**លេខឡូតិ៍:** `{uprn}`")
+            st.markdown(f"**ឈ្មោះ:** {st.session_state.selected_display_name}")
 
             current_owner = owner_name(uprn)
             if current_owner:
-                st.markdown(f"**Owner:** ✅ {current_owner}")
+                st.markdown(f"**ម្ចាស់:** ✅ {current_owner}")
             else:
-                st.info("No owner — click the parcel on the map to assign one.")
+                st.info("មិនទាន់មានម្ចាស់ — ចុចលើផែនទីដើម្បីបញ្ចូល")
 
             parcel_pts = [p for p in points if p.get("uprn") == uprn]
             if parcel_pts:
                 st.divider()
-                st.subheader(f"📍 Points ({len(parcel_pts)})")
+                st.subheader(f"📍 ចំណុច GPS ({len(parcel_pts)})")
                 for p in parcel_pts:
                     st.caption(
                         f"({p['lat']:.6f}, {p['lon']:.6f}) — {p.get('note', '')}"
                     )
         else:
-            st.info("Click a parcel on the map to select it.")
+            st.info("ចុចលើដីឡូតិ៍ក្នុងផែនទី")
             st.caption("🟢 Green parcels = owner assigned")
             st.caption("🔵 Blue parcels = no owner yet")
 
