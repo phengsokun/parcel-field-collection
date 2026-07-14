@@ -258,6 +258,64 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
     ).add_to(m)
 
     folium.LayerControl().add_to(m)
+
+    # JS to preserve map view across Streamlit reruns.
+    # Saves bounds to sessionStorage on every move/zoom, restores on load.
+    m.get_root().html.add_child(
+        folium.Element("""
+<script>
+(function() {
+    var _tries = 0;
+    function _initMap() {
+        var maps = document.querySelectorAll('.folium-map');
+        if (!maps.length || !maps[0]._leaflet_map) {
+            if (++_tries < 100) setTimeout(_initMap, 100);
+            return;
+        }
+        var map = maps[0]._leaflet_map;
+
+        // Restore saved bounds if available (from a rerun)
+        var saved = sessionStorage.getItem('_m_b');
+        if (saved) {
+            try {
+                var b = JSON.parse(saved);
+                map.fitBounds([[b._s, b._w], [b._n, b._e]], {animate: false});
+                sessionStorage.removeItem('_m_b');
+            } catch(e) {}
+        }
+
+        // Save bounds on every pan/zoom so the next rerun can restore
+        function _save() {
+            var bounds = map.getBounds();
+            sessionStorage.setItem('_m_b', JSON.stringify({
+                _s: bounds.getSouth(),
+                _w: bounds.getWest(),
+                _n: bounds.getNorth(),
+                _e: bounds.getEast()
+            }));
+            // Also save after a short delay so the final view is captured
+            clearTimeout(map.__saveTimeout);
+            map.__saveTimeout = setTimeout(function() {
+                var b2 = map.getBounds();
+                sessionStorage.setItem('_m_b', JSON.stringify({
+                    _s: b2.getSouth(), _w: b2.getWest(),
+                    _n: b2.getNorth(), _e: b2.getEast()
+                }));
+            }, 500);
+        }
+        map.on('moveend zoomend', _save);
+        // Also save after fitBounds completes
+        _save();
+        setTimeout(_save, 300);
+        setTimeout(_save, 800);
+    }
+    if (document.readyState === 'complete') _initMap();
+    else window.addEventListener('load', _initMap);
+})();
+</script>
+""")
+    )
+
     return m
 
 # ── Layout ───────────────────────────────────────────────────
