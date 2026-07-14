@@ -124,7 +124,7 @@ defaults = {
     "_last_click_uprn": None,
     "_gps_note": "",
     "show_labels": True,
-    "_dialog_open": False,
+    "_panel_version": 0,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -426,44 +426,7 @@ with st.expander("🔧 Debug", expanded=False):
     st.write("map_data keys:", list(map_data.keys()) if map_data else "empty")
     st.json({k: v for k, v in map_data.items() if k not in ("all_drawings", "bounds")} if map_data else {})
 
-# ── Detect map click & trigger owner dialog ───────────────
-@st.dialog("✏️ បញ្ចូលម្ចាស់ដី", width="small")
-def owner_dialog(uprn, display_name):
-    st.markdown(f"**{display_name}**")
-    st.caption(f"លេខឡូតិ៍: `{uprn}`")
-    current = owner_name(uprn)
-    if current:
-        st.caption(f"ម្ចាស់បច្ចុប្បន្ន: ✅ {current}")
-    new_owner = st.text_input(
-        "ឈ្មោះម្ចាស់", value=current,
-        key=f"dlg_owner_{uprn}",
-        placeholder="ឧ. សុខ ដារ៉ា",
-    )
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button("💾 រក្សាទុក", use_container_width=True):
-            cleaned = new_owner.strip()
-            if cleaned:
-                owners[uprn] = {"name": cleaned, "assigned_at": datetime.now().isoformat()}
-            elif uprn in owners:
-                del owners[uprn]
-            save_json(OWNERS_FILE, owners)
-            _cached_build_map.clear()
-            st.session_state._dialog_open = False
-            st.rerun()
-    with c2:
-        if st.button("🗑️ លុប", use_container_width=True):
-            if uprn in owners:
-                del owners[uprn]
-                save_json(OWNERS_FILE, owners)
-            _cached_build_map.clear()
-            st.session_state._dialog_open = False
-            st.rerun()
-    with c3:
-        if st.button("បោះបង់", use_container_width=True):
-            st.session_state._dialog_open = False
-            st.rerun()
-
+# ── Detect map click ──────────────────────────────────
 if map_data.get("last_object_clicked"):
     clicked = map_data["last_object_clicked"]
     if isinstance(clicked, dict) and "lat" in clicked and "lng" in clicked:
@@ -477,12 +440,65 @@ if map_data.get("last_object_clicked"):
                     "display_name", f"Parcel {new_uprn}"
                 )
                 st.session_state._last_click_uprn = new_uprn
-                st.session_state._dialog_open = True
-                # No st.rerun() — dialog renders on this same cycle,
-                # map stays at its current view.
+                st.rerun()
 
-if st.session_state.get("_dialog_open"):
-    owner_dialog(st.session_state.selected_uprn, st.session_state.selected_display_name)
+# ── Fragment: Right Panel (owner form) ──────────────────
+@st.fragment
+def render_panel():
+    with col_panel:
+        st.subheader("📋 ព័ត៌មានដីឡូតិ៍")
+
+        if st.session_state.selected_uprn:
+            uprn = st.session_state.selected_uprn
+            st.markdown(f"**លេខឡូតិ៍:** `{uprn}`")
+            st.markdown(f"**ឈ្មោះ:** {st.session_state.selected_display_name}")
+
+            current_owner = owner_name(uprn)
+            if current_owner:
+                st.success(f"ម្ចាស់បច្ចុប្បន្ន: {current_owner}")
+
+            # Owner assignment form
+            _ver = st.session_state.get("_panel_version", 0)
+            new_owner = st.text_input(
+                "ឈ្មោះម្ចាស់",
+                value=current_owner,
+                key=f"panel_owner_{uprn}_v{_ver}",
+                placeholder="ឧ. សុខ ដារ៉ា",
+            )
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("💾 រក្សាទុក", use_container_width=True, key=f"save_{uprn}_v{_ver}"):
+                    cleaned = new_owner.strip()
+                    if cleaned:
+                        owners[uprn] = {"name": cleaned, "assigned_at": datetime.now().isoformat()}
+                    elif uprn in owners:
+                        del owners[uprn]
+                    save_json(OWNERS_FILE, owners)
+                    _cached_build_map.clear()
+                    st.session_state._panel_version = _ver + 1
+                    st.rerun()
+            with c2:
+                if st.button("🗑️ លុប", use_container_width=True, key=f"clear_{uprn}_v{_ver}"):
+                    if uprn in owners:
+                        del owners[uprn]
+                        save_json(OWNERS_FILE, owners)
+                    _cached_build_map.clear()
+                    st.session_state._panel_version = _ver + 1
+                    st.rerun()
+
+            # GPS points for this parcel
+            parcel_pts = [p for p in points if str(p.get("uprn", "")) == str(uprn)]
+            if parcel_pts:
+                st.divider()
+                st.subheader(f"📍 ចំណុច GPS ({len(parcel_pts)})")
+                for p in parcel_pts:
+                    st.caption(
+                        f"({p['lat']:.6f}, {p['lon']:.6f}) — {p.get('note', '')}"
+                    )
+        else:
+            st.info("ចុចលើដីឡូតិ៍ក្នុងផែនទី")
+            st.caption("🟥 ក្រហម = មានម្ចាស់")
+            st.caption("🔵 ខៀវ = មិនទាន់មានម្ចាស់")
 
 # ── Fragment: Sidebar ─────────────────────────────────────
 @st.fragment
@@ -550,37 +566,6 @@ def render_sidebar():
         st.metric("Parcels", len(parcels["features"]))
         st.metric("Owners assigned", len([o for o in owners.values() if o.get("name", "").strip()]))
         st.metric("Points collected", len(points))
-
-
-# ── Fragment: Panel ───────────────────────────────────────
-@st.fragment
-def render_panel():
-    with col_panel:
-        st.subheader("📋 ព័ត៌មានដីឡូតិ៍")
-
-        if st.session_state.selected_uprn:
-            uprn = st.session_state.selected_uprn
-            st.markdown(f"**លេខឡូតិ៍:** `{uprn}`")
-            st.markdown(f"**ឈ្មោះ:** {st.session_state.selected_display_name}")
-
-            current_owner = owner_name(uprn)
-            if current_owner:
-                st.markdown(f"**ម្ចាស់:** ✅ {current_owner}")
-            else:
-                st.info("មិនទាន់មានម្ចាស់ — ចុចលើផែនទីដើម្បីបញ្ចូល")
-
-            parcel_pts = [p for p in points if p.get("uprn") == uprn]
-            if parcel_pts:
-                st.divider()
-                st.subheader(f"📍 ចំណុច GPS ({len(parcel_pts)})")
-                for p in parcel_pts:
-                    st.caption(
-                        f"({p['lat']:.6f}, {p['lon']:.6f}) — {p.get('note', '')}"
-                    )
-        else:
-            st.info("ចុចលើដីឡូតិ៍ក្នុងផែនទី")
-            st.caption("🟢 Green parcels = owner assigned")
-            st.caption("🔵 Blue parcels = no owner yet")
 
 
 render_sidebar()
