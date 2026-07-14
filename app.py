@@ -330,10 +330,11 @@ with col_map:
             st.session_state._map_zoom = map_data["zoom"]
 
 # ── DEBUG: show raw map_data ─────────────────────────────
-with st.expander("🔧 Debug: st_folium return data", expanded=False):
+with st.expander("🔧 Debug", expanded=False):
     st.json(map_data)
     st.write("selected_uprn:", st.session_state.get("selected_uprn"))
-    st.write("_last_click_uprn:", st.session_state.get("_last_click_uprn"))
+    st.write("saved_center:", st.session_state.get("_map_center"))
+    st.write("saved_zoom:", st.session_state.get("_map_zoom"))
 
 # ── Detect map click & trigger owner dialog ───────────────
 @st.dialog("✏️ Assign Owner", width="small")
