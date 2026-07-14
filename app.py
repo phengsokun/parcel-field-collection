@@ -86,8 +86,7 @@ def find_parcel_at_point(lat, lng, parcels):
 
 
 # ── Map builder ──────────────────────────────────────────────
-def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
-              center=None, zoom=None):
+def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
     # Compute bounds from all parcel coordinates
     all_coords = []
     for feat in parcels["features"]:
@@ -100,16 +99,13 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
     lats = [c[1] for c in all_coords]
     lons = [c[0] for c in all_coords]
 
-    m = folium.Map(tiles=None)
-    if center and zoom:
-        m.location = [center["lat"], center["lng"]]
-        m.zoom_start = zoom
-        st.session_state._build_used = f"center={center}, zoom={zoom}"
-        st.session_state._last_rendered_view = {"center": center, "zoom": zoom}
-    else:
-        m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
-        st.session_state._build_used = "fit_bounds"
-        st.session_state._last_rendered_view = {"fit_bounds": True}
+    # Set fallback center to Cambodia area so intermediate render
+    # never shows world map while fit_bounds takes effect
+    avg_lat = sum(lats) / len(lats)
+    avg_lon = sum(lons) / len(lons)
+
+    m = folium.Map(tiles=None, location=[avg_lat, avg_lon], zoom_start=14)
+    m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
 
     folium.TileLayer(
         tiles="OpenStreetMap",
@@ -310,48 +306,13 @@ if st.session_state.get("_gps_pending"):
 col_map, col_panel = st.columns([3, 1])
 
 with col_map:
-    # Use saved view if valid (not the bogus {lat:0,lng:0} from initial load)
-    saved_center = st.session_state.get("_map_center")
-    saved_zoom = st.session_state.get("_map_zoom")
-    if saved_center and saved_zoom:
-        clat, clng = saved_center.get("lat", 0), saved_center.get("lng", 0)
-        if abs(clat) < 1 and abs(clng) < 1:
-            saved_center = None
-            saved_zoom = None
-
-    # If dialog is open, preserve the exact view from the last render
-    # so the map doesn't jump when the dialog triggers a rerun
-    if st.session_state.get("_dialog_open"):
-        lv = st.session_state.get("_last_rendered_view", {})
-        if not lv.get("fit_bounds"):
-            saved_center = lv.get("center")
-            saved_zoom = lv.get("zoom")
-        else:
-            saved_center = None
-            saved_zoom = None
-
     m = build_map(parcels, owners, points, st.session_state.selected_uprn,
-                  st.session_state.show_labels,
-                  center=saved_center, zoom=saved_zoom)
+                  st.session_state.show_labels)
     map_data = st_folium(m, width=None, height=620, key="folium_map")
     st.session_state._map_data = map_data
 
-    # Only save view from pan/zoom events — NOT from clicks (which may
-    # carry bogus center data from st_folium)
-    # Also ignore zoom <= 2: st_folium reports zoom=1 even after fit_bounds
-    if not map_data.get("last_object_clicked"):
-        if map_data.get("center") and map_data.get("zoom"):
-            c = map_data["center"]
-            z = map_data["zoom"]
-            if (abs(c.get("lat", 0)) > 1 or abs(c.get("lng", 0)) > 1) and z > 2:
-                st.session_state._map_center = c
-                st.session_state._map_zoom = z
-
 # ── DEBUG: show raw map_data ─────────────────────────────
 with st.expander("🔧 Debug", expanded=False):
-    st.write("build_map used:", st.session_state.get("_build_used", "?"))
-    st.write("saved_center:", st.session_state.get("_map_center"))
-    st.write("saved_zoom:", st.session_state.get("_map_zoom"))
     st.write("map_data keys:", list(map_data.keys()) if map_data else "empty")
     st.json({k: v for k, v in map_data.items() if k not in ("all_drawings", "bounds")} if map_data else {})
 
