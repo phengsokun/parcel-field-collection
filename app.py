@@ -199,7 +199,8 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
 
     def style_fn(feature):
         uprn = feature["properties"]["uprn"]
-        owned = has_owner(uprn)
+        entry = owners.get(uprn)
+        owned = bool(entry and (entry.get("name") or "").strip())
         if uprn == highlight_uprn:
             return {
                 "color": "#ff0000", "weight": 4,
@@ -219,13 +220,15 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
     features = []
     for feat in parcels["features"]:
         uprn = feat["properties"]["uprn"]
+        entry = owners.get(uprn)
+        _owner_display = (entry.get("name") or "").strip() if entry else ""
         features.append({
             "type": "Feature",
             "geometry": feat["geometry"],
             "properties": {
                 "uprn": uprn,
                 "display_name": feat["properties"]["display_name"],
-                "owner": owner_name(uprn) if owner_name(uprn) else "no owner set",
+                "owner": _owner_display if _owner_display else "no owner set",
             },
         })
 
@@ -269,7 +272,8 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
                 c = polygon_centroid(feat)
                 if c is None:
                     continue
-                o_name = owner_name(uprn)
+                entry = owners.get(uprn)
+                o_name = (entry.get("name") or "").strip() if entry else ""
                 if o_name:
                     label_text = f"{uprn} - {o_name}"
                     color = "#d62728"
@@ -349,18 +353,17 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True,
 # ── Layout ───────────────────────────────────────────────────
 import copy
 
-@st.cache_resource
-def _cached_build_map(_owners_json, _points_json, _show_labels, _center_json, _zoom):
-    """Cache the folium Map object. Returns a deep copy so st_folium
-    doesn't mutate the cached instance. When inputs are identical
+@st.cache_data(show_spinner=False)
+def _cached_build_map(owners_json, points_json, show_labels, center_json, zoom):
+    """Cache the folium Map object. When inputs are identical
     (e.g. parcel click without pan/zoom), Streamlit sees identical
     component data and keeps the existing iframe → ZERO flicker."""
-    _owners = json.loads(_owners_json)
-    _points = json.loads(_points_json)
-    _center = json.loads(_center_json) if _center_json else None
+    _owners = json.loads(owners_json)
+    _points = json.loads(points_json)
+    _center = json.loads(center_json) if center_json and center_json != "null" else None
     return build_map(parcels, _owners, _points, highlight_uprn=None,
-                     show_labels=_show_labels,
-                     saved_center=_center, saved_zoom=_zoom)
+                     show_labels=show_labels,
+                     saved_center=_center, saved_zoom=zoom)
 
 # ── GPS eval (must run in main flow for JS bridge) ────────
 if st.session_state.get("_gps_pending"):
@@ -454,6 +457,7 @@ def owner_dialog(uprn, display_name):
             elif uprn in owners:
                 del owners[uprn]
             save_json(OWNERS_FILE, owners)
+            _cached_build_map.clear()
             st.session_state._dialog_open = False
             st.rerun()
     with c2:
@@ -461,6 +465,7 @@ def owner_dialog(uprn, display_name):
             if uprn in owners:
                 del owners[uprn]
                 save_json(OWNERS_FILE, owners)
+            _cached_build_map.clear()
             st.session_state._dialog_open = False
             st.rerun()
     with c3:
