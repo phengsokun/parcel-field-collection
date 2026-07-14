@@ -330,7 +330,7 @@ def owner_dialog(uprn, display_name):
         key=f"dlg_owner_{uprn}",
         placeholder="e.g. Sok Dara",
     )
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
         if st.button("💾 Save", use_container_width=True):
             cleaned = new_owner.strip()
@@ -342,6 +342,13 @@ def owner_dialog(uprn, display_name):
             st.session_state._dialog_open = False
             st.rerun()
     with c2:
+        if st.button("🗑️ Clear", use_container_width=True):
+            if uprn in owners:
+                del owners[uprn]
+                save_json(OWNERS_FILE, owners)
+            st.session_state._dialog_open = False
+            st.rerun()
+    with c3:
         if st.button("Cancel", use_container_width=True):
             st.session_state._dialog_open = False
             st.rerun()
