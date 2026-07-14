@@ -161,9 +161,26 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
         highlight_function=lambda x: {"weight": 3, "fillOpacity": 0.50},
     ).add_to(m)
 
-    # UPRN text labels — injected via JS as non-interactive Leaflet markers
-    # so they never intercept clicks meant for the GeoJSON parcel layer
+    # UPRN text labels at centroids — use folium CircleMarker with
+    # permanent tooltips. Zero-radius invisible markers that don't
+    # intercept clicks, with always-visible labels beside them.
     if show_labels:
+        for feat in parcels["features"]:
+            uprn = feat["properties"]["uprn"]
+            c = polygon_centroid(feat)
+            if c is None:
+                continue
+            folium.CircleMarker(
+                location=[c[1], c[0]],
+                radius=0,
+                fill=False,
+                color="transparent",
+                weight=0,
+                interactive=False,
+            ).add_to(m)
+
+        # Add labels as JS-injected text in a custom pane BELOW the overlay pane
+        # so clicks always pass through to GeoJSON parcels.
         labels_data = []
         for feat in parcels["features"]:
             uprn = feat["properties"]["uprn"]
@@ -186,17 +203,25 @@ def build_map(parcels, owners, points, highlight_uprn=None, show_labels=True):
             return;
         }}
         var _map = maps[0]._leaflet_map;
+        // Create a custom pane with z-index between tilePane (200) and overlayPane (400)
+        if (!_map.getPane('labelPane')) {{
+            _map.createPane('labelPane');
+            _map.getPane('labelPane').style.zIndex = 300;
+            _map.getPane('labelPane').style.pointerEvents = 'none';
+        }}
         _labels.forEach(function(l) {{
+            var icon = L.divIcon({{
+                html: '<div style="font-size:10px;font-weight:bold;color:#222;text-shadow:0 0 3px #fff,0 0 3px #fff;white-space:nowrap;">' + l[2] + '</div>',
+                iconSize: [40, 14],
+                iconAnchor: [20, 7],
+                className: ''
+            }});
             L.marker([l[0], l[1]], {{
-                icon: L.divIcon({{
-                    html: '<div style="font-size:10px;font-weight:bold;color:#222;text-shadow:0 0 3px #fff,0 0 3px #fff;white-space:nowrap;pointer-events:none;">' + l[2] + '</div>',
-                    iconSize: [40, 14],
-                    iconAnchor: [20, 7],
-                    className: ''
-                }}),
+                icon: icon,
                 interactive: false,
                 keyboard: false,
-                bubblingMouseEvents: false
+                bubblingMouseEvents: false,
+                pane: 'labelPane'
             }}).addTo(_map);
         }});
     }}
@@ -279,6 +304,12 @@ with col_map:
     m = build_map(parcels, owners, points, st.session_state.selected_uprn, st.session_state.show_labels)
     map_data = st_folium(m, width=None, height=620)
     st.session_state._map_data = map_data
+
+# ── DEBUG: show raw map_data ─────────────────────────────
+with st.expander("🔧 Debug: st_folium return data", expanded=False):
+    st.json(map_data)
+    st.write("selected_uprn:", st.session_state.get("selected_uprn"))
+    st.write("_last_click_uprn:", st.session_state.get("_last_click_uprn"))
 
 # ── Detect map click & trigger owner dialog ───────────────
 @st.dialog("✏️ Assign Owner", width="small")
