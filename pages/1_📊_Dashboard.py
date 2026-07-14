@@ -95,6 +95,48 @@ else:
 
 st.divider()
 
+# ── All assigned parcels ───────────────────────────────────
+st.subheader("🏠 ដីឡូតិ៍មានម្ចាស់ (All Assigned Parcels)")
+
+all_owned = []
+for f in parcels.get("features", []):
+    uprn = f["properties"]["uprn"]
+    entry = owners.get(str(uprn), owners.get(uprn))
+    if isinstance(entry, dict) and entry.get("name", "").strip():
+        assigned_at = entry.get("assigned_at", "")
+        try:
+            dt = datetime.fromisoformat(assigned_at)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc).astimezone(ICT)
+            date_str = dt.strftime("%Y-%m-%d %H:%M")
+        except (ValueError, TypeError):
+            date_str = assigned_at or "—"
+        all_owned.append({
+            "uprn": uprn,
+            "parcel": f["properties"]["display_name"],
+            "owner": entry["name"],
+            "assigned": date_str,
+        })
+
+if all_owned:
+    st.dataframe(
+        all_owned,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "uprn": st.column_config.TextColumn("លេខឡូតិ៍", width="small"),
+            "parcel": st.column_config.TextColumn("ឈ្មោះ"),
+            "owner": st.column_config.TextColumn("ម្ចាស់"),
+            "assigned": st.column_config.TextColumn("ថ្ងៃបញ្ចូល", width="small"),
+        },
+    )
+    st.caption(f"**{len(all_owned)}** / {total_parcels} parcels assigned "
+               f"({len(all_owned)/total_parcels*100:.0f}%)")
+else:
+    st.info("មិនទាន់មានដីឡូតិ៍បញ្ចូលម្ចាស់")
+
+st.divider()
+
 # ── Last 7 days ────────────────────────────────────────────
 st.subheader("📅 Recent Assignments (Last 7 Days)")
 
